@@ -92,6 +92,7 @@ res as (insert into messages(
   message_time,
   message_edit,
   message_trip,
+  message_name,
   message_origin,
   message_remote,
   message_file_name,
@@ -101,9 +102,10 @@ res as (insert into messages(
   coalesce(nullif(:message_id, 0), nextval('messages_message_id_seq')),
   :message_channel_id,
   :message_body,
-  now(),
-  now(),
+  (now() at time zone 'utc'),
+  (now() at time zone 'utc'),
   :message_trip,
+  :message_name,
   :message_origin,
   :message_remote,
   :message_file_name,
@@ -123,6 +125,7 @@ select
   coalesce(m.message_time, 'epoch') message_time,
   coalesce(m.message_edit, 'epoch') message_edit,
   coalesce(m.message_trip, '') message_trip,
+  coalesce(m.message_name, '') message_name,
   coalesce(m.message_origin, '') message_origin,
   coalesce(m.message_remote, '') message_remote,
   coalesce(m.message_file_name, '') message_file_name,
@@ -150,7 +153,7 @@ const editMessageQuery = `
 with res as (
 update messages set
   message_body = :message_body,
-  message_edit = now(),
+  message_edit = (now() at time zone 'utc'),
   message_file_name = :message_file_name,
   message_file_path = :message_file_path
 where
@@ -171,6 +174,7 @@ select
   coalesce(m.message_time, 'epoch') message_time,
   coalesce(m.message_edit, 'epoch') message_edit,
   coalesce(m.message_trip, '') message_trip,
+  coalesce(m.message_name, '') message_name,
   coalesce(m.message_origin, '') message_origin,
   coalesce(m.message_remote, '') message_remote,
   coalesce(m.message_file_name, '') message_file_name,
@@ -203,7 +207,7 @@ with cte as (
 ),
 res as (
   select * from (
-    table cte order by message_time desc limit $1
+    table cte order by message_time desc limit $2
   ) sub right join (select count(*) > $2 from cte) c(more) on true
 )
 select
@@ -213,6 +217,7 @@ select
   coalesce(message_time, 'epoch') message_time,
   coalesce(message_edit, 'epoch') message_edit,
   coalesce(message_trip, '') message_trip,
+  coalesce(message_name, '') message_name,
   coalesce(message_origin, '') message_origin,
   coalesce(message_remote, '') message_remote,
   coalesce(message_file_name, '') message_file_name,
@@ -287,6 +292,7 @@ select
   coalesce(message_time, 'epoch') message_time,
   coalesce(message_edit, 'epoch') message_edit,
   coalesce(message_trip, '') message_trip,
+  coalesce(message_name, '') message_name,
   coalesce(message_origin, '') message_origin,
   coalesce(message_remote, '') message_remote,
   coalesce(message_file_name, '') message_file_name,
@@ -361,6 +367,7 @@ select
   coalesce(message_time, 'epoch') message_time,
   coalesce(message_edit, 'epoch') message_edit,
   coalesce(message_trip, '') message_trip,
+  coalesce(message_name, '') message_name,
   coalesce(message_origin, '') message_origin,
   coalesce(message_remote, '') message_remote,
   coalesce(message_file_name, '') message_file_name,

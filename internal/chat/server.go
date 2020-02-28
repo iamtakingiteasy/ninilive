@@ -9,10 +9,20 @@ import (
 	"github.com/iamtakingiteasy/ninilive/internal/db/model"
 )
 
+type channel struct {
+	model   *model.Channel
+	clients int
+}
+
 type internalServerStop struct {
 }
 
 type internalTick struct {
+}
+
+type internalServerCheckSession struct {
+	id     string
+	exists bool
 }
 
 type internalServerAddClient struct {
@@ -36,6 +46,11 @@ type internalServerUpdateChannel struct {
 	order int
 }
 
+type internalServerSelectChannel struct {
+	session string
+	channel uint64
+}
+
 type internalServerRemoveChannel struct {
 	id uint64
 }
@@ -53,15 +68,50 @@ type internalServerRemoveMessage struct {
 }
 
 type internalServerBeforeMessages struct {
+	ref       string
 	channelID uint64
 	id        uint64
 	limit     uint64
 }
 
 type internalServerPageMessages struct {
+	ref       string
 	channelID uint64
 	page      uint64
 	limit     uint64
+}
+
+func (server *server) handleCheckSession(ev *internalServerCheckSession) {
+	_, ev.exists = server.clients[ev.id]
+}
+
+func (server *server) handleSelectChannel(ev *internalServerSelectChannel) {
+	if client, ok := server.clients[ev.session]; ok {
+		active := make(map[string]int)
+
+		if channel, ok := server.channels[client.channel]; ok {
+			channel.clients--
+			active[strconv.FormatUint(channel.model.ID, 10)] = channel.clients
+		}
+
+		client.channel = 0
+
+		if channel, ok := server.channels[ev.channel]; ok {
+			channel.clients++
+			active[strconv.FormatUint(channel.model.ID, 10)] = channel.clients
+			client.channel = channel.model.ID
+		}
+
+		if len(active) > 0 {
+			server.handleBroadcast(&event.Protocol{
+				ID:   "",
+				Kind: "active",
+				Data: &protocolActive{
+					Active: active,
+				},
+			})
+		}
+	}
 }
 
 func (server *server) handleAddClient(ev *internalServerAddClient) error {
@@ -86,12 +136,15 @@ func (server *server) handleAddClient(ev *internalServerAddClient) error {
 	}
 
 	channels := &protocolChannels{}
+	active := make(map[string]int)
+
 	for _, c := range server.channels {
 		channels.Channels = append(channels.Channels, protocolChannel{
-			ID:    strconv.FormatUint(c.ID, 10),
-			Name:  c.Name,
-			Order: c.Order,
+			ID:    strconv.FormatUint(c.model.ID, 10),
+			Name:  c.model.Name,
+			Order: c.model.Order,
 		})
+		active[strconv.FormatUint(c.model.ID, 10)] = c.clients
 	}
 
 	anon, err := server.config.Persister.LoadUserByID(0)
@@ -110,7 +163,7 @@ func (server *server) handleAddClient(ev *internalServerAddClient) error {
 
 	client.send(&event.Protocol{
 		ID:   "",
-		Kind: "clients",
+		Kind: "sessions",
 		Data: clients,
 	})
 
@@ -119,12 +172,19 @@ func (server *server) handleAddClient(ev *internalServerAddClient) error {
 		Kind: "channels",
 		Data: channels,
 	})
+	client.send(&event.Protocol{
+		ID:   "",
+		Kind: "active",
+		Data: &protocolActive{
+			Active: active,
+		},
+	})
 
 	for _, c := range server.channels {
 		messages := &protocolMessages{
-			ChannelID: strconv.FormatUint(c.ID, 10),
+			ChannelID: strconv.FormatUint(c.model.ID, 10),
 		}
-		msgs, more, err := server.config.Persister.LoadMessagesLast(c.ID, 100)
+		msgs, more, err := server.config.Persister.LoadMessagesLast(c.model.ID, 100)
 
 		if err != nil {
 			return err
@@ -160,13 +220,22 @@ func renderMessage(m *model.Message) protocolMessage {
 	return protocolMessage{
 		ID:     strconv.FormatUint(m.ID, 10),
 		Body:   m.Body,
-		Time:   m.Time.Format(time.RFC3339),
-		Edit:   m.Time.Format(time.RFC3339),
+		Time:   m.Time.UTC().Format(time.RFC3339),
+		Edit:   m.Time.UTC().Format(time.RFC3339),
 		Trip:   m.Trip,
+		Name:   renderName(m.Name, &m.User),
 		Origin: m.Origin,
 		File:   renderFile(m.FilePath, m.FileName),
 		User:   renderUser(&m.User),
 	}
+}
+
+func renderName(name string, user *model.User) string {
+	if len(name) == 0 {
+		return user.Name
+	}
+
+	return name
 }
 
 func renderUser(user *model.User) *protocolUser {
@@ -211,7 +280,11 @@ func (server *server) handleAddChannel(ev *internalServerAddChannel) error {
 		return err
 	}
 
-	server.channels[c.ID] = c
+	server.channels[c.ID] = &channel{
+		model:   c,
+		clients: 0,
+	}
+
 	server.handleBroadcast(&event.Protocol{
 		ID:   "",
 		Kind: "channelAdd",
@@ -236,7 +309,7 @@ func (server *server) handleRemoveChannel(ev *internalServerRemoveChannel) error
 			ID:   "",
 			Kind: "channelRemove",
 			Data: &protocolChannel{
-				ID: strconv.FormatUint(existing.ID, 10),
+				ID: strconv.FormatUint(existing.model.ID, 10),
 			},
 		})
 
@@ -248,9 +321,9 @@ func (server *server) handleRemoveChannel(ev *internalServerRemoveChannel) error
 
 func (server *server) handleUpdateChannel(ev *internalServerUpdateChannel) error {
 	if existing, ok := server.channels[ev.id]; ok {
-		existing.Name = ev.name
-		existing.Order = ev.order
-		err := server.config.Persister.SaveChannel(existing)
+		existing.model.Name = ev.name
+		existing.model.Order = ev.order
+		err := server.config.Persister.SaveChannel(existing.model)
 
 		if err != nil {
 			return err
@@ -260,9 +333,9 @@ func (server *server) handleUpdateChannel(ev *internalServerUpdateChannel) error
 			ID:   "",
 			Kind: "channelUpdate",
 			Data: &protocolChannel{
-				ID:    strconv.FormatUint(existing.ID, 10),
-				Name:  existing.Name,
-				Order: existing.Order,
+				ID:    strconv.FormatUint(existing.model.ID, 10),
+				Name:  existing.model.Name,
+				Order: existing.model.Order,
 			},
 		})
 	}
@@ -286,6 +359,20 @@ func (server *server) clientDisconnect(client *client) {
 			ID: client.id,
 		},
 	})
+
+	if channel, ok := server.channels[client.channel]; ok {
+		channel.clients--
+
+		server.handleBroadcast(&event.Protocol{
+			ID:   "",
+			Kind: "active",
+			Data: &protocolActive{
+				Active: map[string]int{
+					strconv.FormatUint(channel.model.ID, 10): channel.clients,
+				},
+			},
+		})
+	}
 }
 
 func (server *server) handleAddMessage(ev *internalServerAddMessage) error {
@@ -370,7 +457,7 @@ func (server *server) handleBeforeMessages(ev *internalServerBeforeMessages) err
 	messages.More = more
 
 	server.handleBroadcast(&event.Protocol{
-		ID:   "",
+		ID:   ev.ref,
 		Kind: "messages",
 		Data: messages,
 	})
@@ -397,7 +484,7 @@ func (server *server) handlePageMessages(ev *internalServerPageMessages) error {
 	messages.Pages = int(pages)
 
 	server.handleBroadcast(&event.Protocol{
-		ID:   "",
+		ID:   ev.ref,
 		Kind: "messagesPage",
 		Data: messages,
 	})

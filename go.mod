@@ -7,6 +7,7 @@ require (
 	github.com/go-bindata/go-bindata v3.1.2+incompatible
 	github.com/golang-migrate/migrate/v4 v4.9.1
 	github.com/gorilla/websocket v1.4.1
+	github.com/h2non/filetype v1.0.12
 	github.com/jmoiron/sqlx v1.2.0
 	github.com/lib/pq v1.3.0
 	github.com/satori/go.uuid v1.2.0

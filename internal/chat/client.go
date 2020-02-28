@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aquilax/tripcode"
@@ -13,11 +14,12 @@ import (
 )
 
 type client struct {
-	id     string
-	user   *model.User
-	conn   *websocket.Conn
-	remote string
-	server *server
+	id      string
+	user    *model.User
+	conn    *websocket.Conn
+	remote  string
+	server  *server
+	channel uint64
 }
 
 func (client *client) close() {
@@ -52,13 +54,22 @@ func (client *client) serve() {
 		}
 
 		since := time.Since(last)
+
+		var err error
+
 		if since < time.Millisecond*250 {
-			time.Sleep(time.Millisecond*250 - since)
+			client.send(&event.Protocol{
+				ID:   req.ID,
+				Kind: "error",
+				Data: &protocolError{
+					Message: "request rate throttled",
+				},
+			})
+
+			continue
 		}
 
 		last = time.Now()
-
-		var err error
 
 		switch req.Kind {
 		case "auth":
@@ -72,15 +83,17 @@ func (client *client) serve() {
 		case "messageRemove":
 			err = client.messageRemove(req.Data)
 		case "messageBefore":
-			err = client.messagesBefore(req.Data)
+			err = client.messagesBefore(req.ID, req.Data)
 		case "messagePage":
-			err = client.messagesPage(req.Data)
+			err = client.messagesPage(req.ID, req.Data)
 		case "channelAdd":
 			err = client.channelAdd(req.Data)
 		case "channelUpdate":
 			err = client.channelUpdate(req.Data)
 		case "channelRemove":
 			err = client.channelRemove(req.Data)
+		case "channelSelect":
+			err = client.channelSelect(req.Data)
 		default:
 			err = fmt.Errorf("unknown kind %s", req.Kind)
 		}
@@ -103,7 +116,7 @@ func (client *client) serve() {
 	}
 }
 
-func (client *client) messagesBefore(data []byte) error {
+func (client *client) messagesBefore(ref string, data []byte) error {
 	var req struct {
 		ID        string `json:"id"`
 		ChannelID string `json:"channel_id"`
@@ -125,13 +138,14 @@ func (client *client) messagesBefore(data []byte) error {
 	}
 
 	return event.SendInternal(client.server.control, &internalServerBeforeMessages{
+		ref:       ref,
 		id:        messageID,
 		channelID: channelID,
 		limit:     uint64(req.Limit),
 	})
 }
 
-func (client *client) messagesPage(data []byte) error {
+func (client *client) messagesPage(ref string, data []byte) error {
 	var req struct {
 		ChannelID string `json:"channel_id"`
 		Page      int    `json:"page"`
@@ -148,6 +162,7 @@ func (client *client) messagesPage(data []byte) error {
 	}
 
 	return event.SendInternal(client.server.control, &internalServerPageMessages{
+		ref:       ref,
 		channelID: channelID,
 		page:      uint64(req.Page),
 		limit:     uint64(req.Limit),
@@ -237,14 +252,15 @@ func (client *client) messageSend(data []byte) error {
 
 	message := &model.Message{
 		ChannelID: parsedID,
-		Body:      msg.Body,
+		Body:      strings.TrimSpace(msg.Body),
 		Time:      time.Now(),
 		Edit:      time.Now(),
-		Trip:      tripcode.Tripcode(msg.Trip),
+		Trip:      tripcode.Tripcode(strings.TrimSpace(msg.Trip)),
+		Name:      strings.TrimSpace(msg.Name),
 		Origin:    client.id,
 		Remote:    client.remote,
-		FileName:  fileName,
-		FilePath:  filePath,
+		FileName:  strings.TrimSpace(fileName),
+		FilePath:  strings.TrimSpace(filePath),
 		User:      model.User{},
 	}
 
@@ -334,6 +350,26 @@ func (client *client) channelUpdate(data []byte) error {
 		id:    parsedID,
 		name:  channel.Name,
 		order: channel.Order,
+	})
+}
+
+func (client *client) channelSelect(data []byte) error {
+	var channel struct {
+		ID string `json:"id"`
+	}
+
+	if err := json.Unmarshal(data, &channel); err != nil {
+		return err
+	}
+
+	parsedID, err := strconv.ParseUint(channel.ID, 10, 64)
+	if err != nil {
+		return err
+	}
+
+	return event.SendInternal(client.server.control, &internalServerSelectChannel{
+		session: client.id,
+		channel: parsedID,
 	})
 }
 

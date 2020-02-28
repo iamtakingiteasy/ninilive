@@ -48,11 +48,13 @@ func NewServer(config Config) (Server, error) {
 		config:   config,
 		control:  make(chan *event.Internal),
 		clients:  make(map[string]*client),
-		channels: make(map[uint64]*model.Channel),
+		channels: make(map[uint64]*channel),
 	}
 
 	for _, c := range channels {
-		srv.channels[c.ID] = c
+		srv.channels[c.ID] = &channel{
+			model: c,
+		}
 	}
 
 	return srv, nil
@@ -61,6 +63,7 @@ func NewServer(config Config) (Server, error) {
 // Server chat implementation
 type Server interface {
 	Accept(conn *websocket.Conn, remote string) error
+	CheckSession(id string) bool
 	Serve()
 	Stop() error
 }
@@ -74,7 +77,7 @@ type server struct {
 	config   Config
 	control  chan *event.Internal
 	clients  map[string]*client
-	channels map[uint64]*model.Channel
+	channels map[uint64]*channel
 }
 
 func (server *server) Accept(conn *websocket.Conn, remote string) error {
@@ -83,6 +86,15 @@ func (server *server) Accept(conn *websocket.Conn, remote string) error {
 		remote: remote,
 		conn:   conn,
 	})
+}
+
+func (server *server) CheckSession(id string) bool {
+	ev := &internalServerCheckSession{
+		id: id,
+	}
+	_ = event.SendInternal(server.control, ev)
+
+	return ev.exists
 }
 
 func (server *server) Stop() error {
@@ -139,6 +151,10 @@ func (server *server) Serve() {
 			err = server.handleBeforeMessages(ev)
 		case *internalServerPageMessages:
 			err = server.handlePageMessages(ev)
+		case *internalServerCheckSession:
+			server.handleCheckSession(ev)
+		case *internalServerSelectChannel:
+			server.handleSelectChannel(ev)
 		case *event.Protocol:
 			server.handleBroadcast(ev)
 		default:

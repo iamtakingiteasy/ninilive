@@ -12,6 +12,7 @@ type Message struct {
 	Time      time.Time `db:"message_time"`
 	Edit      time.Time `db:"message_edit"`
 	Trip      string    `db:"message_trip"`
+	Name      string    `db:"message_name"`
 	Origin    string    `db:"message_origin"`
 	Remote    string    `db:"message_remote"`
 	FileName  string    `db:"message_file_name"`

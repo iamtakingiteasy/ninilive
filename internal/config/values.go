@@ -9,7 +9,7 @@ var Default = Values{
 	Upload: ValuesUpload{
 		Dir:      "upload",
 		MaxBytes: 1024 * 1024 * 100,
-		Suffixes: []string{".jpg", ".png", ".gif", ".webm", ".mp4"},
+		Suffixes: []string{"jpg", "png", "gif", "webm", "mp4"},
 	},
 	HTTP: ValuesHTTP{
 		Listen: ":8080",

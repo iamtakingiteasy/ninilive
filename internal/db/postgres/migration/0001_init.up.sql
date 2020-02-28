@@ -19,6 +19,7 @@ create table messages (
     message_time       timestamp,
     message_edit       timestamp,
     message_trip       text,
+    message_name       text,
     message_origin     text,
     message_remote     text,
     message_file_name  text,

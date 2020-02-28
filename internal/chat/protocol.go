@@ -11,6 +11,10 @@ type protocolChannel struct {
 	Order int    `json:"order,omitempty"`
 }
 
+type protocolActive struct {
+	Active map[string]int `json:"active"`
+}
+
 type protocolChannels struct {
 	Channels []protocolChannel `json:"channels,omitempty"`
 }
@@ -48,6 +52,7 @@ type protocolMessage struct {
 	Time      string        `json:"time,omitempty"`
 	Edit      string        `json:"edit,omitempty"`
 	Trip      string        `json:"trip,omitempty"`
+	Name      string        `json:"name,omitempty"`
 	Origin    string        `json:"origin,omitempty"`
 	File      *protocolFile `json:"file,omitempty"`
 	User      *protocolUser `json:"user,omitempty"`
