@@ -1,2 +1,2 @@
-export const endpointHTTP = 'http://127.0.0.1:8081';
-export const endpointWS = 'ws://127.0.0.1:8081/ws/stream';
+export const endpointHTTP = '';
+export const endpointWS = window.location.protocol.replace('http', 'ws') + '//' + window.location.hostname + '/ws/stream';
